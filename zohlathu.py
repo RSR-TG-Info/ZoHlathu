@@ -36,5 +36,5 @@ class RSR:
             return {
                 "title": entry.title,
                 "lyrics": cleaned_content.strip(),
-                "source_url": entry.link
+                "source_url": entry.link,
             }
