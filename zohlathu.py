@@ -1,20 +1,11 @@
 __version__ = "0.1.0"
 __all__ = ["ZohlathuClient", "ZohlathuError"]
 
-# zohlathu/exceptions.py
-class ZohlathuError(Exception):
-    """Base exception class for Zohlathu package"""
-    pass
-
-class LyricsNotFoundError(ZohlathuError):
-    """Raised when lyrics are not found"""
-    pass
 
 import feedparser
 import html2text
 import re
 from typing import Dict, Optional
-from .exceptions import LyricsNotFoundError
 
 class RSR:
     """Client for fetching lyrics from Zohlathu.in"""
