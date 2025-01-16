@@ -1,6 +1,3 @@
-from .client import ZohlathuClient
-from .exceptions import ZohlathuError
-
 __version__ = "0.1.0"
 __all__ = ["ZohlathuClient", "ZohlathuError"]
 
