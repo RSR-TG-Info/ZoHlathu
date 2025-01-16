@@ -22,30 +22,19 @@ class RSR:
             
         Returns:
             dict: Dictionary containing title and lyrics
-            
-        Raises:
-            LyricsNotFoundError: If lyrics are not found
         """
         search_query = query.replace(' ', '+')
         feed_url = f'{self.base_url}?q={search_query}'
         
         feed = feedparser.parse(feed_url)
-        
-        if feed.bozo or feed.status == 404 or not feed.entries:
-            raise LyricsNotFoundError(f"No lyrics found for: {query}")
             
         for entry in feed.entries:
             content = html2text(entry.content[0]['value'])
             pattern = r'\* \* \*(.*?)\* \* \*'
             cleaned_content = re.sub(pattern, '', content, flags=re.DOTALL)
-            
-            if len(cleaned_content) == 0:
-                raise LyricsNotFoundError(f"No lyrics content found for: {query}")
                 
             return {
                 "title": entry.title,
                 "lyrics": cleaned_content.strip(),
                 "source_url": entry.link
             }
-        
-        raise LyricsNotFoundError(f"No lyrics found for: {query}")
