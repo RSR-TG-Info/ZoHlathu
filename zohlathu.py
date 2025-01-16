@@ -1,5 +1,5 @@
-__version__ = "0.1.0"
-__all__ = ["ZohlathuClient", "ZohlathuError"]
+__version__ = "0.1.1"
+__all__ = ["RSR"]
 
 
 import feedparser
