@@ -20,15 +20,15 @@ def readme(file="README.md"):
 
 setup(
     name="zohlathu",
-    version="0.1.0",
+    version="0.1.1",
     packages=find_packages(),
-    install_requires=requirements()
+    install_requires=requirements(),
     author="RSR",
     author_email="imrsrmizo@gmail.com",
     description="A Python package for fetching Mizo song lyrics from Zohlathu.in",
     long_description=readme(),
     long_description_content_type="text/markdown",
-    url="https://github.com/RSR-TG-Info/zohlathu",
+    url="https://github.com/RSR-TG-Info/ZoHlathu",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
