@@ -20,7 +20,7 @@ def readme(file="README.md"):
 
 setup(
     name="zohlathu",
-    version="0.1.1",
+    version="0.1.3",
     packages=find_packages(),
     install_requires=requirements(),
     author="RSR",
