@@ -1,7 +1,3 @@
-__version__ = "0.1.1"
-__all__ = ["RSR"]
-
-
 import feedparser
 import html2text
 import re
