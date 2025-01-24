@@ -1,4 +1,0 @@
-requests
-feedparser
-html2text
-beautifulsoup4
