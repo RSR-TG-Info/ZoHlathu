@@ -1,4 +1,11 @@
-# Usage
+## Installation
+
+You can install the package using pip:
+```bash
+pip3 install zohlathu
+```
+
+## Usage
 ```python
 from zohlathu import get_lyrics
 
@@ -19,7 +26,7 @@ if lyrics:
 * `lyrics['lyrics']` = The lyrics
 * `lyrics['source_url']` = Link of the lyrics
 
-#Handle Errors
+## Handle Errors
 ```python
 try:
     song_name = "C. Sanga - Tawnmang Lasi"  # Replace with your request song name
