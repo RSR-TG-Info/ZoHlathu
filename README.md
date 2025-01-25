@@ -45,3 +45,6 @@ try:
 except Exception as e:
     print(f"An error occurred: {e}")
 ```
+
+
+Required Python 3.7 +
