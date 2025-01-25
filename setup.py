@@ -17,7 +17,7 @@ setup(
         "requests",
         "feedparser",
         "html2text",
-        "beautifulsoup4",
+        "youtube_search",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
