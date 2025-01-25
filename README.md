@@ -15,9 +15,9 @@ if lyrics:
     print(respose)
 ```
 
-● lyrics['title'] = The title of lyrics
-● lyrics['lyrics'] = The lyrics
-● lyrics['source_url'] = Link of the lyrics
+* `lyrics['title']` = The title of lyrics
+* `lyrics['lyrics']` = The lyrics
+* `lyrics['source_url']` = Link of the lyrics
 
 #Handle Errors
 ```python
