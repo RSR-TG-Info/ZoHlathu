@@ -4,16 +4,24 @@ import re
 from typing import Dict, Optional
 from youtube_search import YoutubeSearch
 
-def get_lyrics(query: str) -> Optional[Dict[str, str]]:
+def get_lyrics(query: str, max_retries: int = 3) -> Optional[Dict[str, str]]:
     """
     Fetch lyrics for the given song query
    
     Args:
         query (str): Song name or artist to search for
+        max_retries (int): Maximum number of retry attempts
        
     Returns:
         dict: Dictionary containing title and lyrics, or None if not found
     """
+    # Configure headers
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'application/atom+xml,text/html'
+    }
+
     try:
         # Validate input
         if not query or not isinstance(query, str):
@@ -37,9 +45,10 @@ def get_lyrics(query: str) -> Optional[Dict[str, str]]:
             print(f"YouTube search error: {youtube_error}")
             return None
         
-        # Parse feed
+        # Parse feed with headers
         try:
-            feed = feedparser.parse(feed_url)
+            # Add headers to feedparser
+            feed = feedparser.parse(feed_url, request_headers=headers)
             
             if not feed.entries:
                 print(f"No entries found in feed for query: {query}")
