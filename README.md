@@ -1,4 +1,4 @@
-A Python package for fetching Mizo song lyrics from Zohlathu.in
+A Python package for fetching Mizo song lyrics from zohlathu.in
 
 
 ## Installation
