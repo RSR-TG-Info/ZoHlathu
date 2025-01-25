@@ -1,6 +1,7 @@
 import feedparser
 import html2text
 import re
+import time
 from typing import Dict, Optional
 from youtube_search import YoutubeSearch
 
@@ -23,6 +24,7 @@ def get_lyrics(query: str, max_retries: int = 3) -> Optional[Dict[str, str]]:
     }
 
     try:
+        time.sleep(3)
         # Validate input
         if not query or not isinstance(query, str):
             raise ValueError("Invalid search query. Must be a non-empty string.")
