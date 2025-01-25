@@ -1,6 +1,8 @@
-```from zohlathu import get_lyrics
-
 # Usage
+```
+from zohlathu import get_lyrics
+
+
 song_name = "C. Sanga - Tawnmang Lasi"  # Replace with your request song name
 lyrics = get_lyrics(song_name) # Get the lyrics
 if lyrics:
