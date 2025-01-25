@@ -1,5 +1,5 @@
 # Usage
-```
+```python
 from zohlathu import get_lyrics
 
 
@@ -20,7 +20,7 @@ if lyrics:
 ● lyrics['source_url'] = Link of the lyrics
 
 #Handle Errors
-```
+```python
 try:
     song_name = "C. Sanga - Tawnmang Lasi"  # Replace with your request song name
     lyrics = get_lyrics(song_name) # Get the lyrics
