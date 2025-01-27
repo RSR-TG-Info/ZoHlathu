@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="zohlathu",
-    version="2.0.8",
+    version="2.1.1",
     author="RSR",
     author_email="imrsrmizo@gmail.com",
     description="A A Python package for fetching Mizo song lyrics from Zohlathu.in",
