@@ -13,7 +13,7 @@ pip3 install zohlathu
 from zohlathu import get_lyrics
 
 
-song_name = "C. Sanga - Tawnmang Lasi"  # Replace with your request song name
+song_name = "C. Sanga - Tawnmang Lasi"  # Replace with the name of the song you are requested
 lyrics = get_lyrics(song_name) # Get the lyrics
 if lyrics:
     # Format the response
@@ -25,14 +25,14 @@ if lyrics:
     print(respose)
 ```
 
-* `lyrics['title']` = The title of lyrics
+* `lyrics['title']` = The title of the lyrics
 * `lyrics['lyrics']` = The lyrics
-* `lyrics['source_url']` = Link of the lyrics
+* `lyrics['source_url']` = The url of the lyrics
 
 ## Handle Errors
 ```python
 try:
-    song_name = "C. Sanga - Tawnmang Lasi"  # Replace with your request song name
+    song_name = "C. Sanga - Tawnmang Lasi"  # Replace with the name of the song you are requested
     lyrics = get_lyrics(song_name) # Get the lyrics
     if lyrics:
         # Format the response
