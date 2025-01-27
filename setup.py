@@ -8,7 +8,7 @@ setup(
     version="2.1.1",
     author="RSR",
     author_email="imrsrmizo@gmail.com",
-    description="A A Python package for fetching Mizo song lyrics from Zohlathu.in",
+    description="A Python package for fetching Mizo song lyrics from Zohlathu.in",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/RSR-TG-Info/ZoHlathu",
