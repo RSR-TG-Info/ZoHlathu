@@ -22,7 +22,7 @@ if lyrics:
         f"{lyrics['lyrics']}\n\n"
         f"Source: {lyrics['source_url']}"
     )
-    print(respose)
+    print(response)
 ```
 
 * `lyrics['title']` = The title of the lyrics
@@ -41,7 +41,7 @@ try:
             f"{lyrics['lyrics']}\n\n"
             f"Source: {lyrics['source_url']}"
         )
-        print(respose)
+        print(response)
 except Exception as e:
     print(f"An error occurred: {e}")
 ```
