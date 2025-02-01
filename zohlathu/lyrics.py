@@ -16,7 +16,6 @@ def get_lyrics(query: str, max_retries: int = 3) -> Optional[Dict[str, str]]:
     Returns:
         dict: Dictionary containing title and lyrics, or None if not found
     """
-    # Configure headers
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -25,14 +24,12 @@ def get_lyrics(query: str, max_retries: int = 3) -> Optional[Dict[str, str]]:
 
     try:
         time.sleep(3)
-        # Validate input
         if not query or not isinstance(query, str):
             raise ValueError("Invalid search query. Must be a non-empty string.")
         
         base_url = "https://www.blogger.com/feeds/690973182178026088/posts/default"
         
         try:
-            # Perform YouTube search
             results = YoutubeSearch(f"{query}", max_results=1).to_dict()
             
             if not results:
@@ -47,16 +44,14 @@ def get_lyrics(query: str, max_retries: int = 3) -> Optional[Dict[str, str]]:
             print(f"YouTube search error: {youtube_error}")
             return None
         
-        # Parse feed with headers
         try:
-            # Add headers to feedparser
             feed = feedparser.parse(feed_url, request_headers=headers)
             
             if not feed.entries:
                 print(f"No entries found in feed for query: {query}")
                 return None
             
-            # Process first entry
+            
             entry = feed.entries[0]
             
             # Extract and clean content
