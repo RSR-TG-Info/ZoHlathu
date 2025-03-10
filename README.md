@@ -5,7 +5,7 @@ A Python package for fetching Mizo song lyrics from www.zohlathu.in
 
 You can install the package using pip:
 ```bash
-pip3 install zohlathu
+pip install zohlathu
 ```
 
 ## Usage
