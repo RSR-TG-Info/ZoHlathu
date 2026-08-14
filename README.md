@@ -32,7 +32,7 @@ if lyrics:
 ## Handle Errors
 ```python
 try:
-    song_name = "C. Sanga - Tawnmang Lasi"  # Replace with the name of the song you are requested
+    song_name = "C. Sanga - Tawnmang Lasi"  # Replace this with the name of the requested song.
     lyrics = get_lyrics(song_name) # Get the lyrics
     if lyrics:
         # Format the response
