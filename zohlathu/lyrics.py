@@ -288,7 +288,6 @@ def _compact_similarity(q_norm: str, item: Dict[str, Any]) -> Tuple[float, float
         return 0.98, 1.0
     if q_compact == item["full_compact"] or q_compact == item["rev_full_compact"]:
         return 0.97, 1.0
-
     if len(q_compact) >= 5 and q_compact in s_compact:
         ratio = len(q_compact) / len(s_compact)
         if ratio >= 0.45:
@@ -393,19 +392,20 @@ def _score_catalog_item(q_norm: str, q_tokens: List[str], item: Dict[str, Any]) 
 
 
 class _LyricsHTMLParser(HTMLParser):
-    """Extract clean visible lyrics while skipping embeds, credits, KHB badges, and hidden tags."""
+    """Extract clean visible lyrics while preserving exact single-line and stanza breaks."""
 
     _VOID_TAGS = {
         "area", "base", "br", "col", "embed", "hr", "img",
         "input", "link", "meta", "param", "source", "track", "wbr",
     }
     _SKIP_TAGS = {"script", "style", "iframe", "noscript"}
+    _BLOCK_TAGS = {"p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "tr"}
     _SKIP_CLASS_RE = re.compile(r"\b(?:lyrics-credit-box|rsrtag|khb)\b", re.I)
     _HIDDEN_STYLE_RE = re.compile(r"display\s*:\s*none", re.I)
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.parts: List[str] = []
+        self.tokens: List[Tuple[str, str]] = []
         self._skip_stack: List[str] = []
 
     def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
@@ -427,11 +427,13 @@ class _LyricsHTMLParser(HTMLParser):
             return
 
         if t == "br":
-            self.parts.append("\n")
+            self.tokens.append(("br", ""))
+        elif t in self._BLOCK_TAGS:
+            self.tokens.append(("open", t))
 
     def handle_startendtag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
         if not self._skip_stack and tag.lower() == "br":
-            self.parts.append("\n")
+            self.tokens.append(("br", ""))
 
     def handle_endtag(self, tag: str) -> None:
         t = tag.lower()
@@ -442,14 +444,126 @@ class _LyricsHTMLParser(HTMLParser):
                         break
             return
 
-        if t == "p":
-            self.parts.append("\n\n")
-        elif t in {"div", "li", "h1", "h2", "h3", "h4", "h5", "h6"}:
-            self.parts.append("\n")
+        if t in self._BLOCK_TAGS:
+            self.tokens.append(("close", t))
 
     def handle_data(self, data: str) -> None:
-        if not self._skip_stack:
-            self.parts.append(data)
+        if self._skip_stack or not data:
+            return
+        has_nbsp = "\xa0" in data
+        cleaned = re.sub(r"\s+", " ", data.replace("\xa0", " "))
+        if cleaned.strip():
+            self.tokens.append(("text", cleaned))
+        elif has_nbsp:
+            self.tokens.append(("nbsp", ""))
+        elif cleaned:
+            self.tokens.append(("space", ""))
+
+    def get_lyrics(self) -> str:
+        p_multiline = 0
+        p_empty_spacer = 0
+        saw_p = False
+        p_stack: List[Dict[str, bool]] = []
+
+        for kind, val in self.tokens:
+            if kind == "open" and val == "p":
+                saw_p = True
+                p_stack.append({"has_text": False, "saw_br_after_text": False, "is_multiline": False})
+            elif kind == "text" and p_stack:
+                st = p_stack[-1]
+                if st["saw_br_after_text"]:
+                    st["is_multiline"] = True
+                st["has_text"] = True
+            elif kind == "br":
+                if p_stack:
+                    if p_stack[-1]["has_text"]:
+                        p_stack[-1]["saw_br_after_text"] = True
+                elif saw_p:
+                    p_empty_spacer += 1
+            elif kind == "close" and val == "p" and p_stack:
+                st = p_stack.pop()
+                if st["is_multiline"]:
+                    p_multiline += 1
+                elif not st["has_text"]:
+                    p_empty_spacer += 1
+
+        p_is_paragraph = (p_multiline > 0) or (p_empty_spacer == 0)
+
+        lines: List[str] = []
+        cur: List[str] = []
+        br_run = 0
+        block_stack: List[Dict[str, Any]] = []
+
+        def flush_cur() -> bool:
+            line = re.sub(r"\s+", " ", "".join(cur)).strip()
+            cur.clear()
+            if line:
+                lines.append(line)
+                return True
+            return False
+
+        def add_blank() -> None:
+            if lines and lines[-1] != "":
+                lines.append("")
+
+        for kind, val in self.tokens:
+            if kind == "text":
+                if br_run >= 2:
+                    add_blank()
+                br_run = 0
+                cur.append(val)
+                for frame in block_stack:
+                    frame["has_text"] = True
+            elif kind == "space":
+                if cur:
+                    cur.append(" ")
+            elif kind == "nbsp":
+                if cur:
+                    cur.append(" ")
+                if block_stack:
+                    block_stack[-1]["has_nbsp"] = True
+            elif kind == "br":
+                if flush_cur():
+                    br_run = 1
+                elif lines:
+                    br_run += 1
+                if block_stack:
+                    block_stack[-1]["has_br"] = True
+            elif kind == "open":
+                if block_stack:
+                    block_stack[-1]["has_child"] = True
+                if flush_cur():
+                    br_run = 1
+                block_stack.append({
+                    "tag": val,
+                    "has_text": False,
+                    "has_br": False,
+                    "has_nbsp": False,
+                    "has_child": False,
+                })
+            elif kind == "close":
+                frame = None
+                for idx in range(len(block_stack) - 1, -1, -1):
+                    if block_stack[idx]["tag"] == val:
+                        frame = block_stack.pop(idx)
+                        break
+                if flush_cur():
+                    br_run = 1
+                if frame is not None and lines:
+                    if val == "p" and p_is_paragraph:
+                        add_blank()
+                        br_run = 1
+                    elif not frame["has_text"] and not frame["has_child"] and (frame["has_br"] or frame["has_nbsp"]):
+                        add_blank()
+                        br_run = 1
+                    elif frame["has_text"]:
+                        br_run = max(br_run, 1)
+
+        flush_cur()
+        while lines and lines[-1] == "":
+            lines.pop()
+
+        return "\n".join(lines)
 
 
 def _parse_post_body(raw_html: str) -> Dict[str, Any]:
@@ -509,12 +623,8 @@ def _parse_post_body(raw_html: str) -> Dict[str, Any]:
     parser.feed(raw_html)
     parser.close()
 
-    text = "".join(parser.parts).replace("\r\n", "\n").replace("\xa0", " ")
-    lines = [line.strip() for line in text.split("\n")]
-    lyrics = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-
     return {
-        "lyrics": lyrics,
+        "lyrics": parser.get_lyrics(),
         "khb": khb,
         "composers": composers,
         "also_performed_by": also_performed,
@@ -613,7 +723,6 @@ def _score_full_post(q_norm: str, q_tokens: List[str], post: Dict[str, Any]) -> 
     lyrics_words = set(lyrics_norm.split())
     lyrics_compact = lyrics_norm.replace(" ", "")
     q_compact = q_norm.replace(" ", "")
-
     if len(q_tokens) >= 3 and f" {q_norm} " in f" {lyrics_norm} ":
         return 0.92
     if len(q_compact) >= 10 and q_compact in lyrics_compact:
@@ -670,7 +779,7 @@ def get_lyrics(query: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
     """Fetch verified Mizo song lyrics from Zo Hla thu, or None if no confident match is found."""
     if not query or not isinstance(query, str) or not query.strip():
         raise ValueError("Search query must be a non-empty string.")
-
+        
     target_khb = _extract_khb_query(query)
     if target_khb:
         return _search_khb(target_khb, max_retries=max_retries)
