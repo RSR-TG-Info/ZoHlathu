@@ -1,4 +1,4 @@
-from .lyrics import get_lyrics
+from .lyrics import clear_cache, get_lyrics
 
-__all__ = ['get_lyrics']
-__version__ = '2.1.6'
+__all__ = ["get_lyrics", "clear_cache"]
+__version__ = "2.2.0"
