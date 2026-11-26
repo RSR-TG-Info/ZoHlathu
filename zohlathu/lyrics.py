@@ -1,9 +1,11 @@
+import difflib
 import html
 import json
 import re
 import time
 import urllib.parse
 import urllib.request
+from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional, Tuple
 
 BLOG_ID = "690973182178026088"
@@ -63,18 +65,38 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _phonetic(text: str) -> str:
+    """Fold common Mizo spelling variations (aw/o, ph/f, kh/k, chh/ch, dropped final h)."""
+    if not text:
+        return ""
+    s = (
+        text.replace("aw", "o")
+        .replace("ph", "f")
+        .replace("kh", "k")
+        .replace("th", "t")
+        .replace("chh", "ch")
+        .replace("ngh", "ng")
+    )
+    s = re.sub(r"([aeiou])h\b", r"\1", s)
+    return re.sub(r"([a-z])\1+", r"\1", s)
+
+
 def _extract_khb_query(query: str) -> Optional[str]:
-    norm = _normalize(query)
-    match = re.fullmatch(r"(?:khb|kristian hla bu)\s*(?:no|num|number)?\s*0*(\d+)", norm)
-    if not match:
-        match = re.fullmatch(r"khb0*(\d+)", norm)
+    stripped = re.sub(r"[\(\[\{].*?[\)\]\}]", " ", query)
+    norm = _normalize(stripped)
+    tokens = [w for w in norm.split() if w not in {"lyrics", "lyric", "song", "songs", "mizo", "video", "audio"}]
+    cleaned = " ".join(tokens)
+
+    match = re.fullmatch(
+        r"(?:khb|kristian\s*hla\s*bu)\s*(?:no|num|number)?\s*0*(\d+)\s*(?:na)?(?:\s*(?:hla\s*)?thu)?",
+        cleaned,
+    )
     if match:
         return f"KHB {int(match.group(1))}"
     return None
 
 
 def _clean_query(query: str) -> Tuple[str, List[str]]:
-    # Strip bracketed YouTube tags like (Official Music Video) or [Lyrics]
     stripped = re.sub(r"[\(\[\{].*?[\)\]\}]", " ", query)
     norm = _normalize(stripped)
     tokens = [w for w in norm.split() if w not in NOISE_WORDS]
@@ -111,13 +133,13 @@ def _edit_distance(a: str, b: str) -> int:
 
 
 def _is_abbreviated(short: str, full: str) -> bool:
-    """Match vowel-dropped Mizo shorthand (e.g. bwite -> bawihte, hmngaih -> hmangaih)."""
+    """Match vowel-dropped Mizo shorthand (e.g. boihte -> bawihte, hmagaih -> hmangaih)."""
     ls, lf = len(short), len(full)
     if ls < 3 or lf <= ls or short[0] != full[0]:
         return False
     if ls == 3 and (lf > 5 or short[-1] != full[-1]):
         return False
-    if (ls / lf) < 0.55 or (lf - ls) > 4:
+    if (ls / lf) < 0.52 or (lf - ls) > 4:
         return False
 
     it = iter(full)
@@ -127,9 +149,12 @@ def _is_abbreviated(short: str, full: str) -> bool:
 def _word_similarity(q_word: str, target_word: str) -> float:
     if q_word == target_word:
         return 1.0
-    # Never fuzzy-match pure numbers (e.g. KHB 100 != KHB 101)
     if q_word.isdigit() or target_word.isdigit():
         return 0.0
+    qp, tp = _phonetic(q_word), _phonetic(target_word)
+    if qp and qp == tp and len(q_word) >= 2 and len(target_word) >= 2:
+        return 0.90
+
     if len(q_word) >= 3 and target_word.startswith(q_word):
         return 0.88
     if len(q_word) >= 3 and q_word in target_word:
@@ -139,12 +164,26 @@ def _word_similarity(q_word: str, target_word: str) -> float:
         max_dist = 2 if len(q_word) >= 6 else 1
         dist = _edit_distance(q_word, target_word)
         if dist <= max_dist:
-            return 0.85 if dist == 1 else 0.75
+            return 0.86 if dist == 1 else 0.76
+
+        if len(qp) >= 3 and len(tp) >= 3 and _edit_distance(qp, tp) <= 1:
+            return 0.80
 
         if _is_abbreviated(q_word, target_word):
-            return 0.82
+            return 0.84
 
     return 0.0
+
+
+def _build_compounds(words: List[str]) -> List[str]:
+    """Join adjacent 2- and 3-word pairs so space-merged queries still match cleanly."""
+    compounds: List[str] = []
+    n = len(words)
+    for i in range(n - 1):
+        compounds.append(words[i] + words[i + 1])
+    for i in range(n - 2):
+        compounds.append(words[i] + words[i + 1] + words[i + 2])
+    return compounds
 
 
 def _split_title(title: str) -> Tuple[str, str]:
@@ -171,8 +210,13 @@ def _parse_entry_meta(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     artist, song = _split_title(title)
     song_norm = _normalize(song)
     artist_norm = _normalize(artist)
+    song_words = song_norm.split()
+    artist_words = [w for w in artist_norm.split() if w not in NOISE_WORDS] or artist_norm.split()
 
-    summary_text = (entry.get("summary", {}).get("$t") or "")
+    song_compact = "".join(song_words)
+    artist_compact = "".join(artist_words)
+
+    summary_text = entry.get("summary", {}).get("$t") or ""
     khb_match = re.search(r"\bKHB\s*[-#:.]?\s*0*(\d+)\b", f"{title} {summary_text}", re.I)
     khb = f"KHB {int(khb_match.group(1))}" if khb_match else ""
 
@@ -186,8 +230,14 @@ def _parse_entry_meta(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "song_norm": song_norm,
         "artist_norm": artist_norm,
         "full_norm": _normalize(title),
-        "song_words": song_norm.split(),
-        "artist_words": artist_norm.split(),
+        "song_words": song_words,
+        "artist_words": artist_words,
+        "song_compounds": _build_compounds(song_words),
+        "artist_compounds": _build_compounds(artist_words),
+        "song_compact": song_compact,
+        "song_phon_compact": _phonetic(song_norm).replace(" ", ""),
+        "full_compact": artist_compact + song_compact,
+        "rev_full_compact": song_compact + artist_compact,
     }
 
 
@@ -198,7 +248,7 @@ def _get_catalog(max_retries: int = 3) -> List[Dict[str, Any]]:
 
     items: List[Dict[str, Any]] = []
     start_index = 1
-    batch_size = 150
+    batch_size = 500
 
     while True:
         url = f"{SUMMARY_FEED}?alt=json&max-results={batch_size}&start-index={start_index}"
@@ -227,6 +277,65 @@ def _get_catalog(max_retries: int = 3) -> List[Dict[str, Any]]:
     return _catalog_cache
 
 
+def _compact_similarity(q_norm: str, item: Dict[str, Any]) -> Tuple[float, float]:
+    """Space-agnostic similarity to handle joined/split words and typos."""
+    q_compact = q_norm.replace(" ", "")
+    s_compact = item["song_compact"]
+    if len(q_compact) < 4 or not s_compact:
+        return 0.0, 0.0
+
+    if q_compact == s_compact:
+        return 0.98, 1.0
+    if q_compact == item["full_compact"] or q_compact == item["rev_full_compact"]:
+        return 0.97, 1.0
+
+    if len(q_compact) >= 5 and q_compact in s_compact:
+        ratio = len(q_compact) / len(s_compact)
+        if ratio >= 0.45:
+            return round(min(0.95, 0.85 + 0.10 * ratio), 4), 1.0
+
+    q_phon_compact = _phonetic(q_norm).replace(" ", "")
+    s_phon_compact = item["song_phon_compact"]
+    if len(q_phon_compact) >= 5 and q_phon_compact == s_phon_compact:
+        return 0.93, 1.0
+
+    if len(q_compact) >= 6:
+        max_len_diff = max(3, int(max(len(q_compact), len(s_compact)) * 0.35))
+        if abs(len(q_compact) - len(s_compact)) <= max_len_diff:
+            seq_ratio = difflib.SequenceMatcher(None, q_compact, s_compact).ratio()
+            if seq_ratio >= 0.80:
+                return round(min(0.95, seq_ratio), 4), 1.0
+
+        if s_phon_compact and abs(len(q_phon_compact) - len(s_phon_compact)) <= max_len_diff:
+            phon_ratio = difflib.SequenceMatcher(None, q_phon_compact, s_phon_compact).ratio()
+            if phon_ratio >= 0.84:
+                return round(min(0.92, phon_ratio * 0.96), 4), 1.0
+
+    return 0.0, 0.0
+
+
+def _fuse_split_query_tokens(q_tokens: List[str], target_words: List[str]) -> List[str]:
+    """Merge adjacent query tokens when user split a single title word (e.g. 'tawn mang' -> 'tawnmang')."""
+    if len(q_tokens) < 2 or not target_words:
+        return q_tokens
+
+    fused: List[str] = []
+    i = 0
+    while i < len(q_tokens):
+        if i + 1 < len(q_tokens):
+            pair = q_tokens[i] + q_tokens[i + 1]
+            pair_sim = max((_word_similarity(pair, w) for w in target_words), default=0.0)
+            single_a = max((_word_similarity(q_tokens[i], w) for w in target_words), default=0.0)
+            single_b = max((_word_similarity(q_tokens[i + 1], w) for w in target_words), default=0.0)
+            if pair_sim >= 0.85 and pair_sim > max(single_a, single_b):
+                fused.append(pair)
+                i += 2
+                continue
+        fused.append(q_tokens[i])
+        i += 1
+    return fused
+
+
 def _score_catalog_item(q_norm: str, q_tokens: List[str], item: Dict[str, Any]) -> Tuple[float, float]:
     if not q_tokens:
         return 0.0, 0.0
@@ -236,42 +345,111 @@ def _score_catalog_item(q_norm: str, q_tokens: List[str], item: Dict[str, Any]) 
 
     if f" {q_norm} " in f" {item['song_norm']} ":
         ratio = len(q_norm) / max(len(item["song_norm"]), 1)
-        return min(0.97, 0.88 + (0.09 * ratio)), 1.0
+        return min(0.98, 0.89 + (0.09 * ratio)), 1.0
 
-    q_compact = q_norm.replace(" ", "")
-    s_compact = item["song_norm"].replace(" ", "")
-    if len(q_compact) >= 4 and q_compact == s_compact:
-        return 0.94, 1.0
+    compact_conf, compact_cov = _compact_similarity(q_norm, item)
 
+    eff_tokens = _fuse_split_query_tokens(q_tokens, item["song_words"] + item["artist_words"])
     matched = 0
     song_hits = 0
+    song_words_covered = 0
     score_sum = 0.0
 
-    for qt in q_tokens:
-        best_song = max((_word_similarity(qt, w) for w in item["song_words"]), default=0.0)
-        best_artist = max((_word_similarity(qt, w) for w in item["artist_words"]), default=0.0)
+    for qt in eff_tokens:
+        best_song_word = max((_word_similarity(qt, w) for w in item["song_words"]), default=0.0)
+        best_song_comp = max((_word_similarity(qt, c) for c in item["song_compounds"]), default=0.0) * 0.96
+        best_song = max(best_song_word, best_song_comp)
+
+        best_art_word = max((_word_similarity(qt, w) for w in item["artist_words"]), default=0.0)
+        best_art_comp = max((_word_similarity(qt, c) for c in item["artist_compounds"]), default=0.0) * 0.96
+        best_artist = max(best_art_word, best_art_comp)
 
         if best_song >= best_artist and best_song >= 0.72:
             matched += 1
             song_hits += 1
+            song_words_covered += 2 if best_song_comp > best_song_word else 1
             score_sum += best_song
         elif best_artist >= 0.78:
             matched += 1
-            score_sum += best_artist * 0.90
+            score_sum += best_artist * 0.92
 
-    if matched == 0:
-        return 0.0, 0.0
+    token_conf = 0.0
+    token_cov = 0.0
+    if matched > 0:
+        token_cov = matched / len(eff_tokens)
+        avg_sim = score_sum / len(eff_tokens)
+        song_cov = min(1.0, song_words_covered / max(len(item["song_words"]), 1))
+        token_conf = (avg_sim * 0.82) + (song_cov * 0.18)
 
-    coverage = matched / len(q_tokens)
-    avg_sim = score_sum / len(q_tokens)
-    song_cov = song_hits / max(len(item["song_words"]), 1)
-    confidence = (avg_sim * 0.82) + (song_cov * 0.18)
+        if song_hits == 0:
+            token_conf *= 0.65
 
-    # Downrank artist-only hits so they don't beat actual song title matches
-    if song_hits == 0:
-        confidence *= 0.65
+        token_conf = round(min(token_conf, 0.99), 4)
+        token_cov = round(token_cov, 4)
 
-    return round(min(confidence, 0.99), 4), round(coverage, 4)
+    if compact_conf > token_conf:
+        return compact_conf, compact_cov
+    return token_conf, token_cov
+
+
+class _LyricsHTMLParser(HTMLParser):
+    """Extract clean visible lyrics while skipping embeds, credits, KHB badges, and hidden tags."""
+
+    _VOID_TAGS = {
+        "area", "base", "br", "col", "embed", "hr", "img",
+        "input", "link", "meta", "param", "source", "track", "wbr",
+    }
+    _SKIP_TAGS = {"script", "style", "iframe", "noscript"}
+    _SKIP_CLASS_RE = re.compile(r"\b(?:lyrics-credit-box|rsrtag|khb)\b", re.I)
+    _HIDDEN_STYLE_RE = re.compile(r"display\s*:\s*none", re.I)
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: List[str] = []
+        self._skip_stack: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        t = tag.lower()
+        if self._skip_stack:
+            if t not in self._VOID_TAGS:
+                self._skip_stack.append(t)
+            return
+
+        if t in self._SKIP_TAGS:
+            self._skip_stack.append(t)
+            return
+
+        attr_map = dict(attrs)
+        cls = attr_map.get("class") or ""
+        style = attr_map.get("style") or ""
+        if t not in self._VOID_TAGS and (self._SKIP_CLASS_RE.search(cls) or self._HIDDEN_STYLE_RE.search(style)):
+            self._skip_stack.append(t)
+            return
+
+        if t == "br":
+            self.parts.append("\n")
+
+    def handle_startendtag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        if not self._skip_stack and tag.lower() == "br":
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        t = tag.lower()
+        if self._skip_stack:
+            if t in self._skip_stack:
+                while self._skip_stack:
+                    if self._skip_stack.pop() == t:
+                        break
+            return
+
+        if t == "p":
+            self.parts.append("\n\n")
+        elif t in {"div", "li", "h1", "h2", "h3", "h4", "h5", "h6"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_stack:
+            self.parts.append(data)
 
 
 def _parse_post_body(raw_html: str) -> Dict[str, Any]:
@@ -284,7 +462,6 @@ def _parse_post_body(raw_html: str) -> Dict[str, Any]:
         yt_id = yt_match.group(1) or yt_match.group(2)
         yt_url = f"https://youtu.be/{yt_id}"
 
-    # Extract KHB badge (whether placed at the top or bottom of the post)
     khb = ""
     khb_div = re.search(
         r'<div[^>]*class=["\'][^"\']*\bKHB\b[^"\']*["\'][^>]*>([\s\S]*?)</div>',
@@ -328,20 +505,12 @@ def _parse_post_body(raw_html: str) -> Dict[str, Any]:
             elif "performed" in label:
                 also_performed.extend(names)
 
-    # Strip video embeds, KHB badge, credits box, and any legacy tag blocks
-    body = re.split(r'<div[^>]*class=["\'][^"\']*lyrics-credit-box[^"\']*["\']', raw_html, maxsplit=1, flags=re.I)[0]
-    body = re.split(r'<div[^>]*class=["\'][^"\']*RSRTag[^"\']*["\']', body, maxsplit=1, flags=re.I)[0]
-    body = re.sub(r'<div[^>]*class=["\'][^"\']*(?:separator|KHB)[^"\']*["\'][^>]*>[\s\S]*?</div>', "", body, flags=re.I)
-    body = re.sub(r"<(iframe|script|style)[^>]*>[\s\S]*?</\1>", "", body, flags=re.I)
-    body = re.sub(r"<hr\s*/?>", "", body, flags=re.I)
+    parser = _LyricsHTMLParser()
+    parser.feed(raw_html)
+    parser.close()
 
-    body = re.sub(r"<br\s*/?>\s*", "\n", body, flags=re.I)
-    body = re.sub(r"</p>\s*", "\n\n", body, flags=re.I)
-    body = re.sub(r"</div>\s*", "\n", body, flags=re.I)
-    body = re.sub(r"<[^>]+>", "", body)
-    body = html.unescape(body).replace("\r\n", "\n").replace("\xa0", " ")
-
-    lines = [line.strip() for line in body.split("\n")]
+    text = "".join(parser.parts).replace("\r\n", "\n").replace("\xa0", " ")
+    lines = [line.strip() for line in text.split("\n")]
     lyrics = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
     return {
@@ -409,7 +578,6 @@ def _search_khb(target_khb: str, max_retries: int = 3) -> Optional[Dict[str, Any
     if cached and (time.time() - cached[0]) < CACHE_TTL:
         return dict(cached[1])
 
-    # Check cached catalog first in case KHB number appeared in title/summary
     for item in _catalog_cache:
         if item["khb"].lower() == target_khb.lower():
             post = _get_full_post(item["id"], max_retries=max_retries)
@@ -417,7 +585,6 @@ def _search_khb(target_khb: str, max_retries: int = 3) -> Optional[Dict[str, Any
                 _cache_put(cache_key, post)
                 return post
 
-    # Query Blogger feed with exact phrase first, then unquoted fallback
     for raw_q, limit in ((f'"{target_khb}"', 10), (target_khb, 15)):
         encoded = urllib.parse.quote_plus(raw_q)
         data = _fetch_json(f"{DEFAULT_FEED}?alt=json&q={encoded}&max-results={limit}", max_retries=max_retries)
@@ -440,33 +607,43 @@ def _score_full_post(q_norm: str, q_tokens: List[str], post: Dict[str, Any]) -> 
         " ".join(post["also_performed_by"]),
     ])
     meta_words = _normalize(meta_text).split()
+    meta_targets = meta_words + _build_compounds(meta_words)
+
     lyrics_norm = _normalize(post["lyrics"])
     lyrics_words = set(lyrics_norm.split())
+    lyrics_compact = lyrics_norm.replace(" ", "")
+    q_compact = q_norm.replace(" ", "")
 
-    # Exact multi-word line found inside lyrics
     if len(q_tokens) >= 3 and f" {q_norm} " in f" {lyrics_norm} ":
         return 0.92
+    if len(q_compact) >= 10 and q_compact in lyrics_compact:
+        return 0.90
 
+    eff_tokens = _fuse_split_query_tokens(q_tokens, meta_words)
     meta_hits = 0
     lyric_hits = 0
     sim_sum = 0.0
 
-    for qt in q_tokens:
-        best_meta = max((_word_similarity(qt, w) for w in meta_words), default=0.0)
+    for qt in eff_tokens:
+        best_meta = max((_word_similarity(qt, w) for w in meta_targets), default=0.0)
         if best_meta >= 0.75:
             meta_hits += 1
             sim_sum += best_meta
-        elif qt in lyrics_words or (len(qt) >= 4 and not qt.isdigit() and any(w.startswith(qt) for w in lyrics_words)):
+        elif (
+            qt in lyrics_words
+            or (len(qt) >= 4 and not qt.isdigit() and any(w.startswith(qt) for w in lyrics_words))
+            or (len(qt) >= 5 and qt in lyrics_compact)
+        ):
             lyric_hits += 1
-            sim_sum += 0.72
+            sim_sum += 0.74
 
-    coverage = (meta_hits + lyric_hits) / max(len(q_tokens), 1)
+    coverage = (meta_hits + lyric_hits) / max(len(eff_tokens), 1)
     if coverage < 0.75:
         return 0.0
-    if len(q_tokens) <= 2 and meta_hits == 0:
+    if len(eff_tokens) <= 2 and meta_hits == 0:
         return 0.0
 
-    return round(sim_sum / len(q_tokens), 4)
+    return round(sim_sum / len(eff_tokens), 4)
 
 
 def _search_blogger_feed(q_norm: str, q_tokens: List[str], max_retries: int = 3) -> Optional[Dict[str, Any]]:
@@ -494,7 +671,6 @@ def get_lyrics(query: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
     if not query or not isinstance(query, str) or not query.strip():
         raise ValueError("Search query must be a non-empty string.")
 
-    # Direct lookup for Kristian Hla Bu numbers (e.g. "khb 1", "khb1", "kristian hla bu 1")
     target_khb = _extract_khb_query(query)
     if target_khb:
         return _search_khb(target_khb, max_retries=max_retries)
@@ -513,14 +689,12 @@ def get_lyrics(query: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
 
     candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-    # Fast path: strong title match
     if candidates:
         top_conf, top_cov, top_item = candidates[0]
         required_cov = 1.0 if len(q_tokens) == 1 else 0.75
         if top_conf >= 0.74 and top_cov >= required_cov:
             return _get_full_post(top_item["id"], max_retries=max_retries)
 
-    # Verify top partial matches against credits (covers / composers) and lyrics
     best_post = None
     best_score = 0.0
     for _, _, cand in candidates[:3]:
@@ -535,5 +709,4 @@ def get_lyrics(query: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
     if best_post and best_score >= 0.72:
         return best_post
 
-    # Fallback: full-text search for lyric-line queries
     return _search_blogger_feed(q_norm, q_tokens, max_retries=max_retries)
